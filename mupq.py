@@ -215,6 +215,14 @@ class SimpleTest(BoardTestCase):
             self.log.info("Success")
             return 0
 
+class SimplePrint(BoardTestCase):
+    test_type = 'print'
+
+    def run_test(self, *args, **kwargs):
+        output = super().run_test(*args, **kwargs)
+        print(output)
+
+
 
 class StackBenchmark(BoardTestCase):
     test_type = 'stack'
