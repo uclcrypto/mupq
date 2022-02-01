@@ -197,7 +197,10 @@ class BoardTestCase(abc.ABC):
         for implementation in self.get_implementations():
             if exclude and implementation.scheme in args:
                 continue
-            if not exclude and len(args) > 0 and implementation.scheme not in args:
+            if not exclude and len(args) > 0 and (
+                    implementation.scheme not in args
+                    and implementation.scheme+'/'+implementation.implementation not in args
+                    ):
                 continue
             if self.run_test(implementation) == -1:
                 return -1
