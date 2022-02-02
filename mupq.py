@@ -5,6 +5,7 @@ import re
 import os
 import logging
 import subprocess
+import sys
 import hashlib
 import time
 import statistics
@@ -64,7 +65,8 @@ class Implementation(object):
             makeflags.append(f"MUPQ_NAMESPACE={self.namespace}")
         makeflags.extend(self.extraflags)
         makeflags.append(target)
-        return subprocess.check_call(makeflags)
+        return subprocess.check_call(makeflags, stdout=sys.stdout,
+                stderr=sys.stderr)
 
     def get_binary_path(self, test_type, bin_type=None):
         if bin_type is None:
@@ -192,7 +194,7 @@ class BoardTestCase(abc.ABC):
                                                 self.platform_settings.binary_type)
         return self.interface.run(binary)
 
-    def test_all(self, args=[]):
+    def arg_filtered_implementations(self, args=[]):
         exclude = "--exclude" in args
         for implementation in self.get_implementations():
             if exclude and implementation.scheme in args:
@@ -202,6 +204,10 @@ class BoardTestCase(abc.ABC):
                     and implementation.scheme+'/'+implementation.implementation not in args
                     ):
                 continue
+            yield implementation
+
+    def test_all(self, args=[]):
+        for implementation in self.arg_filtered_implementations(args):
             if self.run_test(implementation) == -1:
                 return -1
 
@@ -309,13 +315,9 @@ class TestVectors(BoardTestCase):
         return subprocess.check_call(makeflags)
 
 
-    def _prepare_testvectors(self, exclude, args):
+    def _prepare_testvectors(self, args):
         for scheme, implementations in self.schemes.items():
             for impl in implementations:
-                if exclude and impl.scheme in args:
-                    continue
-                if not exclude and len(args)>0 and impl.scheme not in args:
-                    continue
                 if impl.implementation not in ('ref', 'clean', 'opt', 'opt-ct'):
                     continue
                 # Build host version
@@ -329,22 +331,20 @@ class TestVectors(BoardTestCase):
                         [hostbin],
                         stderr=subprocess.DEVNULL,
                     ))
-                self.testvectorhash[scheme] = checksum
+                self.testvectorhash[impl.scheme] = checksum
                 break
 
     def test_all(self, args):
+        implems = list(self.arg_filtered_implementations(args))
+        schemes = set(impl.scheme for impl in implems)
         self.schemes = defaultdict(list)
         for implementation in self.get_implementations(all=True):
-            self.schemes[implementation.scheme].append(implementation)
+            if implementation.scheme in schemes:
+                self.schemes[implementation.scheme].append(implementation)
 
-        exclude = "--exclude" in args
-        self._prepare_testvectors(exclude, args)
+        self._prepare_testvectors(args)
 
-        for implementation in self.get_implementations():
-            if exclude and implementation.scheme in args:
-                continue
-            if not exclude and len(args)>0 and implementation.scheme not in args:
-                continue
+        for implementation in implems:
             self.run_test(implementation)
 
 
