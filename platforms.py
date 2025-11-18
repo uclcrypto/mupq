@@ -15,8 +15,8 @@ except ImportError:
 
 class Qemu(mupq.Platform):
 
-    start_pat = re.compile(b'.*={4,}\n', re.DOTALL)
-    end_pat = re.compile(b'#\n', re.DOTALL)
+    start_pat = re.compile(b".*={4,}\n", re.DOTALL)
+    end_pat = re.compile(b"#\n", re.DOTALL)
 
     def __init__(self, qemu, machine):
         super().__init__()
@@ -41,19 +41,18 @@ class Qemu(mupq.Platform):
             binary_path,
         ]
         self.log.info(f'Running QEMU: {" ".join(args)}')
-        output = subprocess.check_output(args,
-                                         stdin=subprocess.DEVNULL)
+        output = subprocess.check_output(args, stdin=subprocess.DEVNULL)
         start = self.start_pat.search(output)
         end = self.end_pat.search(output, start.end())
         if end is None:
-            return 'ERROR'
-        return output[start.end():end.start()].decode('utf-8', 'ignore')
+            return "ERROR"
+        return output[start.end() : end.start()].decode("utf-8", "ignore")
 
 
 class SerialCommsPlatform(mupq.Platform):
 
     # Start pattern is at least five equal signs
-    start_pat = re.compile(b'.*={4,}\n', re.DOTALL)
+    start_pat = re.compile(b".*={4,}\n", re.DOTALL)
 
     def __init__(self, tty="/dev/ttyACM0", baud=38400, timeout=60):
         super().__init__()
@@ -66,26 +65,58 @@ class SerialCommsPlatform(mupq.Platform):
         self._dev.close()
         return super().__exit__(*args, **kwargs)
 
-    def run(self, binary_path):
+    def run(self, binary_path, expected=None):
         self._dev.reset_input_buffer()
         self.flash(binary_path)
-        # Wait for the first equal sign
-        if self._dev.read_until(b'=')[-1] != b'='[0]:
-            raise Exception('Timout waiting for start')
-        # Wait for the end of the equal delimiter
-        start = self._dev.read_until(b'\n')
-        self.log.debug(f'Found start pattern: {start}')
-        if self.start_pat.fullmatch(start) is None:
-            raise Exception('Start does not match')
+        started = False
+        output = bytearray()
+        while True:
+            line = self._dev.read_until(b"\n")
+            x = line.decode("utf-8", "ignore")
+            if len(x) > 2000:
+                print(x[:2000] + "(truncated)")
+            else:
+                print(x, end="")
+            if not line.startswith(b"//") and started:
+                if len(line) == 1:
+                    self.log.error("Empty line")
+                if line == b"#\n":
+                    if expected is not None:
+                        assert output == expected
+                    return output.decode("utf-8", "ignore")
+                if expected is not None:
+                    exp = expected[len(output) : len(output) + len(line)]
+                    assert exp == line  # , f"exp:\n{exp}\nline:\n{line=}"
+                output.extend(line)
+                if expected is not None:
+                    print(f"output {len(output)}/{len(expected)}")
+            if line.endswith(b"====\n"):
+                started = True
+        ## Wait for the first equal sign
+        # if self._dev.read_until(b"=")[-1] != b"="[0]:
+        #    raise Exception("Timout waiting for start")
+        ## Wait for the end of the equal delimiter
+        # start = self._dev.read_until(b"\n")
+        # self.log.debug(f"Found start pattern: {start}")
+        # if self.start_pat.fullmatch(start) is None:
+        #    raise Exception("Start does not match")
         # Wait for the end
         output = bytearray()
-        while len(output) == 0 or output[-1] != b'#'[0]:
-            data = self._dev.read_until(b'#')
+        if expected is not None:
+            report_len = len(expected) // 20
+        while len(output) == 0 or output[-1] != b"#"[0]:
+            # data = self._dev.read_until(b"#")
+            data = self._dev.read(1)
             if b"+" in data:
-                print("+" * data.count(b"+"), end='', flush=True)
+                print("+" * data.count(b"+"), end="", flush=True)
+            if expected is not None and data != b"#":
+                assert expected[len(output) : len(output) + len(data)] == data
+            if expected is not None:
+                if len(output) % report_len == 0:
+                    print(f"output {len(output)}/{len(expected)}")
             output.extend(data)
-        print()
-        return output[:-1].decode('utf-8', 'ignore')
+        # print()
+        return output[:-1].decode("utf-8", "ignore")
 
     @abc.abstractmethod
     def flash(self, binary_path):
@@ -99,7 +130,13 @@ class OpenOCD(SerialCommsPlatform):
 
     def flash(self, binary_path):
         subprocess.check_call(
-            ["openocd", "-f", self.script, "-c", f"program {binary_path} verify reset exit"],
+            [
+                "openocd",
+                "-f",
+                self.script,
+                "-c",
+                f"program {binary_path} verify reset exit",
+            ],
             # stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -120,9 +157,9 @@ class StLink(SerialCommsPlatform):
 class ChipWhisperer(mupq.Platform):
 
     # Start pattern is at least five equal signs
-    start_pat = re.compile('.*={4,}\n', re.DOTALL)
+    start_pat = re.compile(".*={4,}\n", re.DOTALL)
     # End pattern is a hash with a newline
-    end_pat = re.compile('.*#\n', re.DOTALL)
+    end_pat = re.compile(".*#\n", re.DOTALL)
 
     def __init__(self):
         super().__init__()
@@ -142,9 +179,9 @@ class ChipWhisperer(mupq.Platform):
         return self.wrapper
 
     def reset_target(self):
-        self.scope.io.nrst = 'low'
+        self.scope.io.nrst = "low"
         time.sleep(0.05)
-        self.scope.io.nrst = 'high'
+        self.scope.io.nrst = "high"
         time.sleep(0.05)
 
     def flash(self, binary_path):
@@ -160,9 +197,9 @@ class ChipWhisperer(mupq.Platform):
         self.flash(binary_path)
         self.target.flush()
         self.reset_target()
-        data = ''
+        data = ""
         # Wait for the first equal sign
-        while '=' not in data:
+        while "=" not in data:
             data += self.target.read()
         # Wait for the end of the equal delimiter
         match = None
@@ -170,11 +207,11 @@ class ChipWhisperer(mupq.Platform):
             data += self.target.read()
             match = self.start_pat.match(data)
         # Remove the start pattern
-        data = data[:match.end()]
+        data = data[: match.end()]
         # Wait for the end
         match = None
         while match is None:
             data += self.target.read()
             match = self.end_pat.match(data)
         # Remove stop pattern and return
-        return data[:match.end() - 2]
+        return data[: match.end() - 2]
